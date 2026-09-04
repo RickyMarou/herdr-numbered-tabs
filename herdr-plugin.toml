@@ -1,0 +1,51 @@
+id = "numbered.tabs"
+name = "Numbered Tabs"
+version = "0.1.0"
+min_herdr_version = "0.7.0"
+description = "Prefix every tab label with its current displayed position/shortcut number"
+platforms = ["linux", "macos"]
+
+[[startup]]
+command = ["python3", "numbered_tabs.py", "reconcile"]
+
+[[events]]
+on = "tab.created"
+command = ["python3", "numbered_tabs.py", "reconcile"]
+
+[[events]]
+on = "tab.closed"
+command = ["python3", "numbered_tabs.py", "reconcile"]
+
+[[events]]
+on = "tab.moved"
+command = ["python3", "numbered_tabs.py", "reconcile"]
+
+[[events]]
+on = "tab.renamed"
+command = ["python3", "numbered_tabs.py", "reconcile"]
+
+# TUI tab close (keybinding) does NOT emit tab.closed to plugins (verified in
+# Herdr 0.8.2 source: actions.rs close path only mutates state + logs; the API
+# paths emit tab.closed). After a TUI close the focus moves to a surviving tab,
+# which emits tab.focused / pane.focused via sync_focus_events. Hook both as
+# backups so closes renumber correctly. Idempotent reconcile makes the extra
+# events harmless.
+[[events]]
+on = "tab.focused"
+command = ["python3", "numbered_tabs.py", "reconcile"]
+
+[[events]]
+on = "pane.focused"
+command = ["python3", "numbered_tabs.py", "reconcile"]
+
+[[actions]]
+id = "reconcile"
+title = "Renumber tabs"
+contexts = ["workspace"]
+command = ["python3", "numbered_tabs.py", "reconcile", "--force"]
+
+[[actions]]
+id = "rollback"
+title = "Restore original tab labels"
+contexts = ["workspace"]
+command = ["python3", "numbered_tabs.py", "rollback"]
