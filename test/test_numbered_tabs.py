@@ -19,6 +19,13 @@ import subprocess
 import sys
 import tempfile
 
+# tomli (Py<3.11) / tomllib (Py>=3.11): parse the plugin manifest in tests.
+# No live Herdr session is touched.
+try:
+    import tomllib as _toml
+except ImportError:  # pragma: no cover - Python < 3.11
+    import tomli as _toml  # type: ignore
+
 PLUGIN_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PLUGIN = os.path.join(PLUGIN_DIR, "numbered_tabs.py")
 
@@ -547,6 +554,87 @@ def main():
         check("reenable: disabled cleared", state.get("disabled") is False, f"state={state}")
         check("reenable: exits 0", p_plain.returncode == p_force.returncode == 0,
               f"{p_plain.returncode},{p_force.returncode}")
+
+    # 21. REGRESSION (middle-close reindex bug): the plugin must react to the
+    #  Herdr 0.9.0 pane-close cascade. Closing a tab by removing its LAST pane
+    #  (TUI prefix+x on a single-pane tab; `herdr pane close`) removes the tab
+    #  but emits ONLY `pane.closed` -- no `tab.closed`, no focus event. Without
+    #  a `pane.closed` hook no reconcile runs and surviving tabs keep stale
+    #  numbers (`[1] main / [3] agent-b`). Parse the MANIFEST and require the
+    #  hook. This test fails before the fix (manifest had no `pane.closed`).
+    manifest_path = os.path.join(PLUGIN_DIR, "herdr-plugin.toml")
+    with open(manifest_path, "rb") as fh:
+        manifest = _toml.load(fh)
+    hook_events = [hook.get("on") for hook in manifest.get("events", [])]
+    check("manifest: hooks include pane.closed (pane-close cascade fix)",
+          "pane.closed" in hook_events, f"events={hook_events}")
+    # Every hook name must also be valid for Herdr (dot-named event kinds the
+    # plugin registry accepts; mirrored from Herdr 0.9.0 PLUGIN_HOOK_EVENT_KINDS).
+    known_events = {
+        "workspace.created", "workspace.updated", "workspace.closed",
+        "workspace.renamed", "workspace.moved", "workspace.reordered",
+        "workspace.focused", "worktree.created", "worktree.opened",
+        "worktree.removed", "tab.created", "tab.closed", "tab.renamed",
+        "tab.moved", "tab.focused", "pane.created", "pane.closed",
+        "pane.focused", "pane.moved", "pane.exited", "pane.agent_detected",
+        "pane.agent_status_changed",
+    }
+    check("manifest: all hook names valid for Herdr 0.9.0",
+          all(name in known_events for name in hook_events),
+          f"invalid={[e for e in hook_events if e not in known_events]}")
+    # tab.closed must also be hooked (the dedicated `tab.close` path).
+    check("manifest: hooks include tab.closed",
+          "tab.closed" in hook_events, f"events={hook_events}")
+
+    # 22. REGRESSION (middle-close reindex logic): the exact reported scenario
+    #  `[1] main / [2] agent-a / [3] agent-b`, middle tab closed -> surviving
+    #  tab must renumber `[3] agent-b` -> `[2] agent-b` (not stay stale). The
+    #  fixture models the post-close tab list a `pane.closed`-triggered
+    #  reconcile would see.
+    state, renames, _ = run_case(
+        "middle_close_renumber",
+        [
+            tab("w1:t1", "w1", 1, "[1] main"),
+            tab("w1:t3", "w1", 3, "[3] agent-b"),
+        ],
+        [
+            ("w1:t3", "[2] agent-b"),
+        ],
+        pre_state={"bases": {
+            "w1:t1": "main",
+            "w1:t2": "agent-a",
+            "w1:t3": "agent-b",
+        }, "disabled": False},
+    )
+    check("middle_close_renumber: surviving tab renumbers to [2]", renames == [
+        ("w1:t3", "[2] agent-b"),
+    ], f"renames={renames}")
+    check("middle_close_renumber: bases preserved", state["bases"]["w1:t3"] == "agent-b",
+          f"state={state}")
+
+    # 23. User-controlled names are never double-prefixed or clobbered: a tab
+    #  the user renames to a digit-leading name keeps it as the base.
+    state, renames, _ = run_case(
+        "user_controlled_names",
+        [
+            tab("w1:t1", "w1", 1, "[1] main"),
+            tab("w1:t2", "w1", 2, "7 secrets"),
+            tab("w1:t3", "w1", 3, "[3] agent-b"),
+        ],
+        [
+            ("w1:t2", "[2] 7 secrets"),
+        ],
+        pre_state={"bases": {
+            "w1:t1": "main",
+            "w1:t2": "7 secrets",
+            "w1:t3": "agent-b",
+        }, "disabled": False},
+    )
+    check("user_controlled_names: digit-leading user name preserved (no double prefix)", renames == [
+        ("w1:t2", "[2] 7 secrets"),
+    ], f"renames={renames}")
+    check("user_controlled_names: base intact", state["bases"]["w1:t2"] == "7 secrets",
+          f"state={state}")
 
     print("\n=== summary ===")
     print(f"  {len(PASS)} passed, {len(FAIL)} failed")

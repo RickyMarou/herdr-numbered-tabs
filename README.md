@@ -14,8 +14,10 @@ because the prefix follows display order, not the stable per-workspace
 
 ## What it does
 
-- On startup, and on every `tab.created`, `tab.closed`, `tab.moved`, and
-  `tab.renamed` event, reconciles all tabs in every workspace.
+- On startup, and on every `tab.created`, `tab.closed`, `tab.moved`,
+  `tab.renamed`, `pane.closed`, `tab.focused`, and `pane.focused` event,
+  reconciles all tabs in every workspace. Reconcile is idempotent, so the
+  extra event hooks are harmless (see “Recursion and race protection”).
 - For each tab, computes `desired = [<display position>] <base label>` and
   renames only when the current label differs (idempotent).
 - **Numbers only.** The plugin never takes over tab names — it only adds and
@@ -82,6 +84,27 @@ The plugin keeps a state file (`HERDR_PLUGIN_STATE_DIR/tabs.json`) mapping
    base. Otherwise the whole label is the base.
 3. Only renames a tab when `desired != current` (idempotent).
 
+## How renumbering stays correct when tabs close (Herdr 0.9.0 event model)
+
+Herdr 0.9.0 emits different plugin events depending on how a tab is closed.
+The plugin hooks every path that can remove a tab:
+
+| Close gesture (TUI / CLI) | Server method | Plugin event | Renumber? |
+| --- | --- | --- | --- |
+| `prefix+shift+x`, context menu “Close tab”, `herdr tab close` | `tab.close` | `tab.closed` | ✔️ (hooked) |
+| **`prefix+x` on a single-pane tab**, `herdr pane close` (last pane) | `pane.close` | **only `pane.closed`** | ✔️ (hooked — was the bug) |
+
+Closing a tab by closing its last pane (the TUI `prefix+x` default close)
+removes the tab but emits **only** `pane.closed` — no `tab.closed`, and no
+focus event. Before the `pane.closed` hook was added, closing a middle tab
+left the surviving tabs with stale numbers (e.g. `[1] main / [3] agent-b`
+instead of `[1] main / [2] agent-b`). This plugin now hooks `pane.closed`, so
+any pane-close that removes a tab renumbers immediately.
+
+`tab.focused` / `pane.focused` remain as backstops for focus-move paths where
+the tab list changes without a `tab.closed`/`pane.closed` (reconcile is
+idempotent, so these extra events are cheap and safe).
+
 ## Recursion and race protection
 
 - **Recursive `tab.renamed` loops:** renaming a tab fires a `tab.renamed` event,
@@ -105,7 +128,8 @@ The plugin keeps a state file (`HERDR_PLUGIN_STATE_DIR/tabs.json`) mapping
 ## Enable / disable lifecycle
 
 - **Rollback** sets `disabled = true`: event hooks (`tab.created`, `tab.closed`,
-  `tab.moved`, `tab.renamed`) become no-ops, so tabs stay unnumbered.
+  `tab.moved`, `tab.renamed`, `pane.closed`, `tab.focused`, `pane.focused`)
+  become no-ops, so tabs stay unnumbered.
 - **Reconcile action** runs with `--force`: it clears `disabled` and renumbers
   everything again.
 - This lets you safely turn the plugin off (rollback), inspect, and turn it
