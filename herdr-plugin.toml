@@ -31,9 +31,19 @@ command = ["python3", "numbered_tabs.py", "reconcile"]
 #   * Closing a tab by closing its LAST pane (TUI prefix+x on a single-pane tab;
 #     CLI `herdr pane close`) removes the tab but emits ONLY `pane.closed` --
 #     no `tab.closed`, and no focus event. Without a `pane.closed` hook the
-#     surviving tabs keep stale numbers. This was the middle-close reindex bug.
+#     surviving tabs keep stale numbers. Hooked below.
+#   * A pane whose PROCESS EXITS (agent/shell process ends; TUI close that
+#     terminates the pane) autocloses the now-empty TAB and emits ONLY
+#     `pane.exited` -- no `tab.closed`, no `pane.closed`. This is the most
+#     common daily path for "deleting" a tab. Without a `pane.exited` hook the
+#     surviving tabs keep stale numbers (the middle-close reindex bug the user
+#     still hit after the pane.closed fix). Hooked below.
 #   * `tab.focused` / `pane.focused` remain valid backstops (idempotent
 #     reconcile makes extra events harmless) for any focus-move path.
+[[events]]
+on = "pane.exited"
+command = ["python3", "numbered_tabs.py", "reconcile"]
+
 [[events]]
 on = "pane.closed"
 command = ["python3", "numbered_tabs.py", "reconcile"]

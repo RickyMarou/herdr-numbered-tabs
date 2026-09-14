@@ -555,19 +555,22 @@ def main():
         check("reenable: exits 0", p_plain.returncode == p_force.returncode == 0,
               f"{p_plain.returncode},{p_force.returncode}")
 
-    # 21. REGRESSION (middle-close reindex bug): the plugin must react to the
-    #  Herdr 0.9.0 pane-close cascade. Closing a tab by removing its LAST pane
-    #  (TUI prefix+x on a single-pane tab; `herdr pane close`) removes the tab
-    #  but emits ONLY `pane.closed` -- no `tab.closed`, no focus event. Without
-    #  a `pane.closed` hook no reconcile runs and surviving tabs keep stale
-    #  numbers (`[1] main / [3] agent-b`). Parse the MANIFEST and require the
-    #  hook. This test fails before the fix (manifest had no `pane.closed`).
+    # 21. REGRESSION (middle-close reindex bug): the plugin must react to EVERY
+    #  Herdr 0.9.0 path that can remove a tab:
+    #    tab.close -> tab.closed ; pane.close (last pane) -> pane.closed ;
+    #    pane PROCESS EXITS (last pane) -> pane.exited (autocloses the empty
+    #    tab, emitting ONLY pane.exited -- no tab.closed/pane.closed).
+    #  Without the matching hook no reconcile runs and surviving tabs keep stale
+    #  numbers (`[1] main / [3] agent-b`). Parse the MANIFEST and require all of
+    #  them. This test fails before the fix (pane.closed was added in PR #1;
+    #  pane.exited in PR #2).
     manifest_path = os.path.join(PLUGIN_DIR, "herdr-plugin.toml")
     with open(manifest_path, "rb") as fh:
         manifest = _toml.load(fh)
     hook_events = [hook.get("on") for hook in manifest.get("events", [])]
-    check("manifest: hooks include pane.closed (pane-close cascade fix)",
-          "pane.closed" in hook_events, f"events={hook_events}")
+    for required in ("pane.closed", "pane.exited", "tab.closed"):
+        check(f"manifest: hooks include {required}",
+              required in hook_events, f"events={hook_events}")
     # Every hook name must also be valid for Herdr (dot-named event kinds the
     # plugin registry accepts; mirrored from Herdr 0.9.0 PLUGIN_HOOK_EVENT_KINDS).
     known_events = {
@@ -582,9 +585,6 @@ def main():
     check("manifest: all hook names valid for Herdr 0.9.0",
           all(name in known_events for name in hook_events),
           f"invalid={[e for e in hook_events if e not in known_events]}")
-    # tab.closed must also be hooked (the dedicated `tab.close` path).
-    check("manifest: hooks include tab.closed",
-          "tab.closed" in hook_events, f"events={hook_events}")
 
     # 22. REGRESSION (middle-close reindex logic): the exact reported scenario
     #  `[1] main / [2] agent-a / [3] agent-b`, middle tab closed -> surviving
