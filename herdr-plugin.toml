@@ -24,12 +24,20 @@ command = ["python3", "numbered_tabs.py", "reconcile"]
 on = "tab.renamed"
 command = ["python3", "numbered_tabs.py", "reconcile"]
 
-# TUI tab close (keybinding) does NOT emit tab.closed to plugins (verified in
-# Herdr 0.8.2 source: actions.rs close path only mutates state + logs; the API
-# paths emit tab.closed). After a TUI close the focus moves to a surviving tab,
-# which emits tab.focused / pane.focused via sync_focus_events. Hook both as
-# backups so closes renumber correctly. Idempotent reconcile makes the extra
-# events harmless.
+# Herdr 0.9.0 event behavior (re-checked 2026-09; supersedes the 0.8.2 notes):
+#   * `tab.close` (CLI `herdr tab close`; TUI prefix+shift+x; context menu)
+#     emits `tab.closed` to plugins -> hooked below. Was broken in 0.8.2, works
+#     in 0.9.0.
+#   * Closing a tab by closing its LAST pane (TUI prefix+x on a single-pane tab;
+#     CLI `herdr pane close`) removes the tab but emits ONLY `pane.closed` --
+#     no `tab.closed`, and no focus event. Without a `pane.closed` hook the
+#     surviving tabs keep stale numbers. This was the middle-close reindex bug.
+#   * `tab.focused` / `pane.focused` remain valid backstops (idempotent
+#     reconcile makes extra events harmless) for any focus-move path.
+[[events]]
+on = "pane.closed"
+command = ["python3", "numbered_tabs.py", "reconcile"]
+
 [[events]]
 on = "tab.focused"
 command = ["python3", "numbered_tabs.py", "reconcile"]

@@ -15,11 +15,18 @@ Design goals (per user requirements):
     leading `[digits] ` badge. This makes reconciliation robust even if the
     state file is lost or a tab moved while the plugin was disabled.
 
-Herdr 0.8.2 limitation (issue #3470): `tab.rename` permanently marks a tab as
-custom-named (`custom_name = Some(...)`); there is no API to restore automatic
-naming. This plugin therefore stores each tab's ORIGINAL base label in a state
-file so it can re-prefix and roll back without ever losing the base name. It
-cannot, however, turn a custom tab back into an auto-named tab.
+Herdr limitation (issue #3470, re-checked in 0.9.0): `tab.rename` permanently
+marks a tab as custom-named (`custom_name = Some(...)`); there is no API to
+restore automatic naming. This plugin therefore stores each tab's ORIGINAL base
+label in a state file so it can re-prefix and roll back without ever losing the
+base name. It cannot, however, turn a custom tab back into an auto-named tab.
+
+Herdr 0.9.0 event coverage: closing a tab by closing its LAST pane (`pane.close`
+-- the TUI `prefix+x` default close) removes the tab but emits ONLY `pane.closed`
+(no `tab.closed`, no focus event). The plugin manifest therefore hooks
+`pane.closed` in addition to `tab.closed`, so a middle-tab close renumbers the
+surviving tabs (`[1] main / [3] agent-b` -> `[1] main / [2] agent-b`). Reconcile
+is idempotent and runs on every hook, so extra events are harmless.
 
 Concurrency: plugin event hooks run asynchronously (up to 32 in flight). A
 reconcile triggered by our own `tab.renamed` event would otherwise race with
