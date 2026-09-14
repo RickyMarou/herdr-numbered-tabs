@@ -21,12 +21,13 @@ restore automatic naming. This plugin therefore stores each tab's ORIGINAL base
 label in a state file so it can re-prefix and roll back without ever losing the
 base name. It cannot, however, turn a custom tab back into an auto-named tab.
 
-Herdr 0.9.0 event coverage: closing a tab by closing its LAST pane (`pane.close`
--- the TUI `prefix+x` default close) removes the tab but emits ONLY `pane.closed`
-(no `tab.closed`, no focus event). The plugin manifest therefore hooks
-`pane.closed` in addition to `tab.closed`, so a middle-tab close renumbers the
-surviving tabs (`[1] main / [3] agent-b` -> `[1] main / [2] agent-b`). Reconcile
-is idempotent and runs on every hook, so extra events are harmless.
+Herdr 0.9.0 event coverage: a tab can be removed three ways, and this plugin
+hooks all three -- `tab.close` emits `tab.closed`; closing a tab's LAST pane
+emits only `pane.closed`; and a tab's pane PROCESS EXITING (shell/agent process
+ends) autocloses the now-empty tab and emits only `pane.exited` (no
+`tab.closed`, no `pane.closed`). Without the `pane.exited` hook the surviving
+tabs keep stale numbers after a middle-close (`[1] main / [3] agent-b`).
+Reconcile is idempotent and runs on every hook, so extra events are harmless.
 
 Concurrency: plugin event hooks run asynchronously (up to 32 in flight). A
 reconcile triggered by our own `tab.renamed` event would otherwise race with

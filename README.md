@@ -15,9 +15,10 @@ because the prefix follows display order, not the stable per-workspace
 ## What it does
 
 - On startup, and on every `tab.created`, `tab.closed`, `tab.moved`,
-  `tab.renamed`, `pane.closed`, `tab.focused`, and `pane.focused` event,
-  reconciles all tabs in every workspace. Reconcile is idempotent, so the
-  extra event hooks are harmless (see “Recursion and race protection”).
+  `tab.renamed`, `pane.closed`, `pane.exited`, `tab.focused`, and
+  `pane.focused` event, reconciles all tabs in every workspace. Reconcile is
+  idempotent, so the extra event hooks are harmless (see “Recursion and race
+  protection”).
 - For each tab, computes `desired = [<display position>] <base label>` and
   renames only when the current label differs (idempotent).
 - **Numbers only.** The plugin never takes over tab names — it only adds and
@@ -93,17 +94,22 @@ The plugin hooks every path that can remove a tab:
 | --- | --- | --- | --- |
 | `prefix+shift+x`, context menu “Close tab”, `herdr tab close` | `tab.close` | `tab.closed` | ✔️ (hooked) |
 | **`prefix+x` on a single-pane tab**, `herdr pane close` (last pane) | `pane.close` | **only `pane.closed`** | ✔️ (hooked — was the bug) |
+| **A tab's pane PROCESS EXITS** (agent/shell process ends; TUI close that terminates the pane) | `pane` exits → empty tab autocloses | **only `pane.exited`** | ✔️ (hooked) |
 
 Closing a tab by closing its last pane (the TUI `prefix+x` default close)
 removes the tab but emits **only** `pane.closed` — no `tab.closed`, and no
-focus event. Before the `pane.closed` hook was added, closing a middle tab
-left the surviving tabs with stale numbers (e.g. `[1] main / [3] agent-b`
-instead of `[1] main / [2] agent-b`). This plugin now hooks `pane.closed`, so
-any pane-close that removes a tab renumbers immediately.
+focus event. And when a tab's last pane **process exits** (the most common
+daily way a tab disappears — an agent/shell process just ends), Herdr
+autocloses the now-empty tab and emits **only** `pane.exited`, again with no
+`tab.closed`/`pane.closed`. Before these hooks were added, closing a middle
+tab left the surviving tabs with stale numbers (e.g. `[1] main / [3] agent-b`
+instead of `[1] main / [2] agent-b`). This plugin hooks both `pane.closed` and
+`pane.exited`, so any pane-close or pane-exit that removes a tab renumbers
+immediately.
 
 `tab.focused` / `pane.focused` remain as backstops for focus-move paths where
-the tab list changes without a `tab.closed`/`pane.closed` (reconcile is
-idempotent, so these extra events are cheap and safe).
+the tab list changes without a `tab.closed`/`pane.closed`/`pane.exited`
+(reconcile is idempotent, so these extra events are cheap and safe).
 
 ## Recursion and race protection
 
@@ -128,8 +134,8 @@ idempotent, so these extra events are cheap and safe).
 ## Enable / disable lifecycle
 
 - **Rollback** sets `disabled = true`: event hooks (`tab.created`, `tab.closed`,
-  `tab.moved`, `tab.renamed`, `pane.closed`, `tab.focused`, `pane.focused`)
-  become no-ops, so tabs stay unnumbered.
+  `tab.moved`, `tab.renamed`, `pane.closed`, `pane.exited`, `tab.focused`,
+  `pane.focused`) become no-ops, so tabs stay unnumbered.
 - **Reconcile action** runs with `--force`: it clears `disabled` and renumbers
   everything again.
 - This lets you safely turn the plugin off (rollback), inspect, and turn it
